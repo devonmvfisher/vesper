@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#05040a" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Vesper" />
+  <meta name="description" content="Vesper — one Sol, two modes: LEARN (planetarium · tours · science) and LIVE (PILOT · docks · crew RPG). Soft-land, FLOAT/PILOT, no install." />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png" />
+  <title>Vesper — Evening Planetarium</title>
+  <link rel="stylesheet" href="css/styles.css" />
+<script>
+document.addEventListener("touchmove", function (e) {
+  var t = e.target;
+  if (t && t.closest && t.closest("input, textarea, select, #ship-log, #agent-log, .help-card, .panel")) return;
+  e.preventDefault();
+}, { passive: false });
+</script>
+</head>
+<body class="hud-compact">
+  <div id="loader" role="status" aria-live="polite">
+    <div class="loader-card">
+      <h1 class="loader-title">Vesper</h1>
+      <p class="loader-sub">Float·Learn = sky · Pilot·Live = land · same Sol · some far dots sit inside the almanac a</p>
+      <div class="loader-bar" aria-hidden="true"><span id="loader-bar-fill"></span></div>
+    </div>
+  </div>
+
+  <div id="canvas-wrap" aria-label="Interactive planetarium view"></div>
+
+  <div id="hud">
+    <div class="topbar">
+      <div class="brand">
+        <h1>Vesper</h1>
+        <p class="brand-hint desktop-only">FLOAT/PILOT flight · LEARN/LIVE product · WASD · drag look · Travel · Tour · soft-land · H help</p>
+      </div>
+      <div class="chip-row">
+        <div class="chip" id="look-chip">Deep space</div>
+        <div class="chip" id="product-chip" title="Same Sol · Float·Learn vs Pilot·Live">FLOAT·LEARN</div>
+        <div class="chip" id="speed-chip" title="Mode · gear · speed">FLOAT · 0</div>
+        <div class="chip chip-quiet mobile-hide" id="gear-chip" title="Gear">CRUISE</div>
+        <div class="chip chip-quiet mobile-hide" id="clock-chip" title="Clock">CRUISE</div>
+        <div class="chip chip-quiet mobile-hide" id="sim-clock-chip">Sim <span class="clock" id="sim-clock">00:00</span></div>
+        <div class="chip" id="river-chip" hidden title="River">River</div>
+      </div>
+    </div>
+
+    <div class="bottombar">
+      <div class="panel compact">
+        <div class="controls">
+          <div class="row mode-row product-row" role="group" aria-label="Product mode — same Sol">
+            <button type="button" class="btn product active" id="btn-product-learn" data-product="learn" title="Float·Learn — planetarium · tours · science · relax (same Sol as Pilot·Live)">Float·Learn</button>
+            <button type="button" class="btn product" id="btn-product-live" data-product="live" title="Pilot·Live — soft-land · docks · crew RPG · quests (same Sol as Float·Learn)">Pilot·Live</button>
+          </div>
+          <div class="row mode-row primary-row" role="group" aria-label="Mode — one Sol">
+            <button type="button" class="btn" id="btn-more" aria-expanded="false" title="Flight feel, gears, clock">More</button>
+            <button type="button" class="btn" id="btn-hide-hud" title="Hide menus (U). Stick stays." aria-pressed="false">Hide</button>
+            <button type="button" class="btn" id="btn-cinema-hud" title="Cinema — hide movement and the HUD">Cinema</button>
+          </div>
+          <div class="hud-secondary" id="hud-secondary" hidden>
+            <div class="row mode-row" role="group" aria-label="Flight feel override">
+              <button type="button" class="btn mode active" id="btn-float" data-mode="float" title="Override: FLOAT feel without leaving Learn/Live">FLOAT feel</button>
+              <button type="button" class="btn mode" id="btn-pilot" data-mode="pilot" title="Override: PILOT feel without leaving Learn/Live">PILOT feel</button>
+            </div>
+            <div class="row mode-row gear-row" role="group" aria-label="Cruise gear">
+              <button type="button" class="btn gear-btn" data-gear="dock" title="DOCK">DOCK</button>
+              <button type="button" class="btn gear-btn active" data-gear="cruise" title="CRUISE">CRUISE</button>
+              <button type="button" class="btn gear-btn" data-gear="burn" title="BURN">BURN</button>
+              <button type="button" class="btn gear-btn" data-gear="transit" title="TRANSIT">TRANSIT</button>
+            </div>
+            <div class="row mode-row clock-row" role="group" aria-label="Celestial clock">
+              <button type="button" class="btn clock-btn" data-clock="paused" title="Orbits frozen">⏸</button>
+              <button type="button" class="btn clock-btn" data-clock="realtime" title="Real crawl">REAL</button>
+              <button type="button" class="btn clock-btn active" data-clock="cruise" title="Cruise clock">CRUISE</button>
+              <button type="button" class="btn clock-btn" data-clock="fast" title="Fast">FAST</button>
+              <button type="button" class="btn clock-btn" data-clock="cinematic" title="Cine">CINE</button>
+            </div>
+            <div class="row wind-row mobile-hide">
+              <label for="wind-down">Mood</label>
+              <input id="wind-down" type="range" min="0" max="100" value="45" />
+            </div>
+            <div class="row mode-row" role="group" aria-label="Quality">
+              <button type="button" class="btn" data-quality="auto" title="Auto quality">Auto</button>
+              <button type="button" class="btn" data-quality="high" title="High">High</button>
+              <button type="button" class="btn" data-quality="ultra" title="Ultra desktop">Ultra</button>
+            </div>
+            <div class="row actions secondary-actions">
+              <button type="button" class="btn" id="btn-pause" title="Pause ship + orbits">Pause</button>
+              <button type="button" class="btn" id="btn-straight" title="Sol honesty (Y) — hide Hyp fiction; radii boosted; some far dots sit inside the almanac a" aria-pressed="false">Sol</button>
+              <button type="button" class="btn" id="btn-build" title="Build (B)">Build</button>
+              <button type="button" class="btn" id="btn-help" title="Help (H)">Help</button>
+              <button type="button" class="btn primary" id="btn-reset" title="Home (R)">Home</button>
+            </div>
+          </div>
+          <div class="row go-row" role="group" aria-label="Travel and tour">
+            <select id="travel-select" class="travel-select" aria-label="Travel">
+              <option value="">Go…</option>
+              <option value="Home">Home</option>
+            </select>
+            <select id="tour-select" class="travel-select tour-select" aria-label="FLOAT tour section">
+              <option value="inner">Tour · Inner</option>
+              <option value="belt" selected>Tour · Belt</option>
+              <option value="giants">Tour · Giants</option>
+              <option value="ice">Tour · Ice</option>
+              <option value="dwarfs">Tour · Dwarfs</option>
+              <option value="hypothetics">Tour · Hyp</option>
+              <option value="craft">Tour · Craft</option>
+            </select>
+            <button type="button" class="btn" id="btn-tour-go" title="Start tour">▶</button>
+            <button type="button" class="btn" id="btn-tour-stop" title="Stop tour">■</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="touch-flight" aria-hidden="true">
+    <div id="stick-base" class="stick-base no-select">
+      <div id="stick-knob" class="stick-knob"></div>
+    </div>
+    <div class="vert-thrust" aria-label="Vertical thrust">
+      <button type="button" id="btn-thrust-up" class="vert-btn no-select" aria-label="Thrust up" tabindex="-1">
+        <svg class="vert-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 5l8 12H4z"/></svg>
+      </button>
+      <button type="button" id="btn-thrust-down" class="vert-btn no-select" aria-label="Thrust down" tabindex="-1">
+        <svg class="vert-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 19L4 7h16z"/></svg>
+      </button>
+    </div>
+    <button type="button" id="btn-boost" class="boost-btn no-select" tabindex="-1" aria-label="Boost">⚡</button>
+    <button type="button" id="btn-soft-land" class="land-btn no-select" tabindex="-1" aria-label="Soft land" hidden>LAND</button>
+  </div>
+
+  <div id="help-panel" class="help-panel" role="dialog" aria-label="Controls" aria-hidden="true">
+    <div class="help-card">
+      <div class="help-head">
+        <strong>Controls · 6DOF</strong>
+        <button type="button" id="help-close" class="btn">Close</button>
+      </div>
+      <p class="help-lead"><b>Float·Learn</b> = planetarium · tours · science. <b>Pilot·Live</b> = land · docks · crew. Same Sol. Stick/WASD · drag look · Hide (U).</p>
+      <ul class="help-list">
+        <li><b>Move</b> WASD / arrows — translate only (left stick on phone)</li>
+        <li><b>Look</b> Drag the sky — never the stick</li>
+        <li><b>Up / Down</b> In flight: E · Space / Q · Ctrl (thruster pads on phone). On the ground E is talk, not up.</li>
+        <li><b>Roll</b> Z / C · <b>Boost</b> Shift / ⚡ · Scroll thrusts along look · pinch zooms the chase view</li>
+        <li><b>LEARN / LIVE</b> Same Sol, one app — <b>LEARN</b> = planetarium · tours · science · relax; <b>LIVE</b> = PILOT · land · docks · crew RPG · quests.</li>
+        <li><b>FLOAT / PILOT</b> Keys 1 · 2 — flight feel inside either product. FLOAT = lazy-river idle; PILOT = manual 6DOF.</li>
+        <li><b>Gears</b> [ ] or , . — <em>DOCK / CRUISE / BURN / TRANSIT</em> speed bands. Hold ⚡/Shift for boost ramp (not binary).</li>
+        <li><b>Clock</b> Orbits only: 0 pause · 3 real · 4 cruise · 5 fast · 6 cine — <em>you still fly</em></li>
+        <li><b>Pause</b> Freezes ship <em>and</em> orbits (Ctrl+Space). Clock ⏸ is orbits-only.</li>
+        <li><b>Travel</b> Sun, planets, moons, dwarfs (Vesta/Ceres/Haumea/Eris…), Home</li>
+        <li><b>Skim / Walk</b> Soft hover; soft-land to walk rocks &amp; worlds; thrust up / boost takeoff. Sun skim-only.</li>
+        <li><b>Life</b> I inv · J journal · E talk/pickup · G rover · V cam · ✦ flare — U opens guilds only while walking in Live; in flight U hides menus. Bottom life bar on phone</li>
+        <li><b>Ship</b> Chase/cockpit cam · soft-land parks craft · Space leaves on a desktop · hold ▲ on a phone</li>
+        <li><b>Straight Man</b> Y / Sol — vanilla scientific Sol; hides bots, artifacts, fantasy builds</li>
+        <li><b>Build</b> B — craft props (metal/ice/rock/glass/antenna/habitat/<b>Solar</b>/<b>Beacon</b>); tap places · Erase in the tray removes</li>
+        <li><b>Society</b> Optional Grok-bot asteroid habitats (density-capped; Straight Man hides)</li>
+        <li><b>Hide controls</b> U in flight — menus hide; the stick stays. While walking in Live, U opens guilds instead. Cinema hides movement too. Slim edge tab restores</li>
+        <li><b>Almanac</b> Body-note cards on focus/travel — quiet, auto-dismiss; hidden in cinema</li>
+        <li><b>Notebook</b> N — export local soft-land milestones + focus fact (JSON)</li>
+        <li><b>Tour</b> FLOAT routes — Inner / Belt / Giants / Ice / Dwarfs / Hyp / <b>Craft</b> (ISS·Starman·rovers)</li>
+        <li><b>Observation Station</b> Travel menu · Belt tours · lit beacon on a belt rock · Walkman unlock</li>
+        <li><b>Home</b> R — Earth overlook</li>
+      </ul>
+      <p class="help-lead selectable-text" id="help-science">First principles: <b>planet orbits keep real AU ratios</b>. Some far TNOs and probes sit closer than their almanac a — the look chip says display and a. <b>Radii are display-boosted</b> (not true angular size) so skim works on a phone. Hyp bodies stay labeled fiction. Sol button hides Hyp. README · SCIENCE.md.</p>
+      <p class="help-lead" id="help-privacy">Call companion is offline-first; API keys (Advanced) stay on this device — see PRIVACY.md.</p>
+      <p class="help-lead" id="help-radio">Observation Station (belt habitat): soft-land · walk in · <b>E / tap</b> the Walkman to equip. Radio HUD unlocks after. Instrumental Web Audio only.</p>
+    </div>
+  </div>
+
+  <button type="button" id="hud-restore" class="hud-restore" aria-label="Show controls" title="Show controls" hidden>Controls</button>
+
+  <div id="build-tray" class="build-tray" hidden aria-label="Build materials">
+    <span class="build-tray-label">Craft</span>
+    <button type="button" class="mat-btn" data-mat="erase" title="Erase — tap a block to remove it">Erase</button>
+    <button type="button" class="mat-btn active" data-mat="metal" title="Metal plating">Metal</button>
+    <button type="button" class="mat-btn" data-mat="ice" title="Ice">Ice</button>
+    <button type="button" class="mat-btn" data-mat="rock" title="Rock">Rock</button>
+    <button type="button" class="mat-btn" data-mat="glass" title="Glass / viewport">Glass</button>
+    <button type="button" class="mat-btn" data-mat="antenna" title="Antenna / spar">Antenna</button>
+    <button type="button" class="mat-btn" data-mat="habitat" title="Habitat panel">Habitat</button>
+    <button type="button" class="mat-btn" data-mat="solar" title="Solar array">Solar</button>
+    <button type="button" class="mat-btn" data-mat="beacon" title="Hope beacon">Beacon</button>
+  </div>
+
+  <div id="guide-toast" aria-live="polite"></div>
+
+  <script defer src="vendor/three.min.js"></script>
+  <script defer src="js/vesper-deep-sky.js"></script>
+  <script defer src="js/vesper-proc-textures.js"></script>
+  <script defer src="js/main.js"></script>
+  <script defer src="js/vesper-layers.js"></script>
+  <script defer src="js/vesper-radio.js"></script>
+  <script defer src="js/vesper-tours.js"></script>
+  <script defer src="js/vesper-hypothetics.js"></script>
+  <script defer src="js/vesper-catalog.js"></script>
+  <script defer src="js/vesper-surfaces.js"></script>
+  <script defer src="js/vesper-science.js"></script>
+  <script defer src="js/vesper-walk-fx.js"></script>
+  <script defer src="js/vesper-walk-audio.js"></script>
+  <script defer src="js/vesper-physics-hud.js"></script>
+  <script defer src="js/vesper-hope.js"></script>
+  <script defer src="js/vesper-transfer.js"></script>
+  <script defer src="js/vesper-integrity.js"></script>
+  <script defer src="js/vesper-milestones.js"></script>
+  <script defer src="js/vesper-notebook.js"></script>
+  <script defer src="js/vesper-body-notes.js"></script>
+  <script defer src="js/vesper-companion-brain.js"></script>
+  <script defer src="js/vesper-ship.js"></script>
+  <script defer src="js/vesper-life.js"></script>
+  <script defer src="js/vesper-places.js"></script>
+  <script defer src="js/vesper-suit.js"></script>
+  <script defer src="js/agent-overlay.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("./sw.js").then(function (reg) {
+          if (!reg) return;
+          var poke = function () {
+            if (reg.waiting) reg.waiting.postMessage({ type: "vesper-skip-wait" });
+          };
+          poke();
+          var arm = function (w) {
+            if (!w) return;
+            w.addEventListener("statechange", poke);
+          };
+          // updatefound often fires before this listener exists.
+          arm(reg.installing);
+          reg.addEventListener("updatefound", function () { arm(reg.installing); });
+        }).catch(function () {});
+      });
+    }
+  </script>
+</body>
+</html>
