@@ -89,6 +89,10 @@ document.addEventListener("touchmove", function (e) {
               <button type="button" class="btn" data-quality="high" title="High">High</button>
               <button type="button" class="btn" data-quality="ultra" title="Ultra desktop">Ultra</button>
             </div>
+            <div class="row mode-row" role="group" aria-label="Optional texture detail">
+              <button type="button" class="btn" id="btn-load-detail" disabled aria-describedby="detail-status">Load detail · 6.4 MB images</button>
+            </div>
+            <p id="detail-status" class="help-lead" role="status" aria-live="polite">Low-data start. Optional images load only when requested.</p>
             <div class="row actions secondary-actions">
               <button type="button" class="btn" id="btn-pause" title="Pause ship + orbits">Pause</button>
               <button type="button" class="btn" id="btn-straight" title="Sol honesty (Y) — hide Hyp fiction; radii boosted; some far dots sit inside the almanac a" aria-pressed="false">Sol</button>

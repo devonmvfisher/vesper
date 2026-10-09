@@ -1,5 +1,7 @@
 /* Vesper service worker — shell + planet textures (tunnel / offline friendly) */
-const CACHE = 'vesper-v361000';
+const CACHE = 'vesper-v361001-lowdata';
+// This predecessor contains these exact unchanged maps. Do not reuse its scripts.
+const TEXTURE_PREDECESSOR = 'vesper-v361000';
 const ASSETS = [
   './',
   './index.html',
@@ -65,12 +67,7 @@ self.addEventListener('install', (event) => {
         if (!res.ok) throw new Error("vesper cache " + u);
         await c.put(u, res);
       }));
-      await Promise.all(TEXTURES.map(async (u) => {
-        try {
-          const res = await fetch(u, { cache: "reload" });
-          if (res && res.ok) await c.put(u, res);
-        } catch (_) {}
-      }));
+
     })
   );
 });
@@ -81,9 +78,9 @@ self.addEventListener('message', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    // Preserve useful caches and unrelated apps on a shared origin.
+    // Optional predecessor maps are reused lazily, never bulk downloaded.
+    self.clients.claim()
   );
 });
 
@@ -97,6 +94,41 @@ self.addEventListener('fetch', (event) => {
   // Never cache-first our own script. Update check must see new bytes. A stale sw.js would freeze CACHE updates.
   if (url.pathname.endsWith("/sw.js")) {
     event.respondWith(fetch(req));
+    return;
+  }
+
+  // Known optional maps: cache-first with NO background refresh. Fixed URLs
+  // are unchanged in this release; bump URLs if future artwork changes.
+  const optional = TEXTURES.some((path) => new URL(path, self.registration.scope).href === req.url);
+  if (optional) {
+    let cacheWrite = Promise.resolve();
+    const response = (async () => {
+      let current;
+      // Storage denial/quota trouble must not make a requested image unusable.
+      try {
+        current = await caches.open(CACHE);
+        const hit = await current.match(req);
+        if (hit) return hit;
+        const names = await caches.keys();
+        if (names.includes(TEXTURE_PREDECESSOR)) {
+          const previous = await caches.open(TEXTURE_PREDECESSOR);
+          const saved = await previous.match(req);
+          if (saved) {
+            cacheWrite = current.put(req, saved.clone()).catch(() => {});
+            return saved;
+          }
+        }
+      } catch (_) {}
+      const res = await fetch(req);
+      if (res && res.ok && current) {
+        // Do not await body consumption: the page needs streaming progress
+        // to distinguish a slow connection from an inactive connection.
+        cacheWrite = current.put(req, res.clone()).catch(() => {});
+      }
+      return res;
+    })();
+    event.respondWith(response);
+    event.waitUntil(response.then(() => cacheWrite, () => {}));
     return;
   }
 
@@ -115,14 +147,14 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE).then((c) => c.put(req, copy));
         }
         return res;
-      }).catch(() => caches.match(req).then((c) => c || caches.match('./index.html')))
+      }).catch(() => caches.open(CACHE).then(async (c) => (await c.match(req)) || c.match('./index.html')))
     );
     return;
   }
 
   // Assets: cache-first, refresh in background
   event.respondWith(
-    caches.match(req).then((cached) => {
+    caches.open(CACHE).then((c) => c.match(req)).then((cached) => {
       const net = fetch(req).then((res) => {
         if (res && res.ok) {
           const copy = res.clone();

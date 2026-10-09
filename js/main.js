@@ -810,27 +810,136 @@
   setProgress(0.18);
 
   // --- Texture loading --------------------------------------------------
-  const texLoader = new THREE.TextureLoader();
-  function loadTex(name, opts) {
+  // Original maps are optional. No image request runs until Load detail is used.
+  const TEXTURE_NAMES = {
+    sun: "2k_sun.jpg", mercury: "2k_mercury.jpg", venus: "2k_venus_atmosphere.jpg",
+    earth: "2k_earth_daymap.jpg", clouds: "2k_earth_clouds.jpg", moon: "2k_moon.jpg",
+    mars: "2k_mars.jpg", jupiter: "2k_jupiter.jpg", saturn: "2k_saturn.jpg",
+    ring: "2k_saturn_ring_alpha.png", uranus: "2k_uranus.jpg", neptune: "2k_neptune.jpg",
+    starsMW: "2k_stars_milky_way.jpg",
+  };
+  const detailLoaded = new Set();
+  let detailController = null;
+  const detailButton = document.getElementById("btn-load-detail");
+  const detailStatus = document.getElementById("detail-status");
+
+  function loadTex(name, opts, signal) {
     return new Promise((resolve) => {
-      texLoader.load(
-        TEX + name,
-        (t) => {
-          t.colorSpace = THREE.SRGBColorSpace;
-          t.anisotropy = Math.min(qualityTier === "ultra" ? 16 : 8, renderer.capabilities.getMaxAnisotropy() || 8);
-          t.generateMipmaps = true;
-          t.minFilter = THREE.LinearMipmapLinearFilter;
-          t.magFilter = THREE.LinearFilter;
-          if (opts && opts.wrap) {
-            t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      const request = new AbortController();
+      let settled = false, timer, objectURL, img;
+      // An inactivity limit, not a total download limit: slow progress is OK.
+      function armTimeout() {
+        clearTimeout(timer);
+        timer = setTimeout(() => finish(null), 30000);
+      }
+      function finish(texture) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (signal) signal.removeEventListener("abort", cancel);
+        if (!texture) request.abort();
+        if (img) {
+          img.onload = img.onerror = null;
+          if (!texture) img.removeAttribute("src");
+        }
+        if (objectURL) URL.revokeObjectURL(objectURL);
+        resolve(texture);
+      }
+      function cancel() { finish(null); }
+      if (signal && signal.aborted) { finish(null); return; }
+      if (signal) signal.addEventListener("abort", cancel, { once: true });
+      armTimeout();
+      (async () => {
+        try {
+          const response = await fetch(TEX + name, { signal: request.signal });
+          if (settled) return;
+          if (!response.ok) throw new Error("Texture unavailable");
+          armTimeout();
+          let blob;
+          if (response.body && response.body.getReader) {
+            const reader = response.body.getReader();
+            const chunks = [];
+            try {
+              while (!settled) {
+                const part = await reader.read();
+                if (settled) return;
+                if (part.done) break;
+                chunks.push(part.value);
+                armTimeout();
+              }
+            } finally {
+              reader.releaseLock();
+            }
+            blob = new Blob(chunks, { type: response.headers.get("content-type") || "" });
+          } else {
+            // Older fetch implementations cannot expose incremental progress.
+            blob = await response.blob();
           }
-          resolve(t);
-        },
-        undefined,
-        () => resolve(null)
-      );
+          if (settled) return;
+          armTimeout();
+          objectURL = URL.createObjectURL(blob);
+          // Use a normal image, as TextureLoader did; ImageBitmap has different
+          // flipY handling. Keep the original Three color/filter conventions.
+          img = new Image();
+          img.onload = () => {
+            if (settled) return;
+            if (img.naturalWidth <= 1 || img.naturalHeight <= 1) { finish(null); return; }
+            const t = new THREE.Texture(img);
+            t.colorSpace = THREE.SRGBColorSpace;
+            t.anisotropy = Math.min(qualityTier === "ultra" ? 16 : 8, renderer.capabilities.getMaxAnisotropy() || 8);
+            t.generateMipmaps = true;
+            t.minFilter = THREE.LinearMipmapLinearFilter;
+            t.magFilter = THREE.LinearFilter;
+            if (opts && opts.wrap) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+            t.needsUpdate = true;
+            finish(t);
+          };
+          img.onerror = () => finish(null);
+          img.src = objectURL;
+        } catch (_) { finish(null); }
+      })();
     });
   }
+
+  async function loadOptionalDetails() {
+    if (!state.ready) return;
+    if (detailController) { detailController.abort(); return; }
+    const run = new AbortController();
+    detailController = run;
+    if (detailButton) detailButton.textContent = "Stop detail loading";
+    let failed = false;
+    try {
+      // One request at a time; repeat attempts retain all completed maps.
+      for (const key of Object.keys(TEXTURE_NAMES)) {
+        if (run.signal.aborted) break;
+        if (detailLoaded.has(key)) continue;
+        if (detailStatus) detailStatus.textContent = "Detail " + detailLoaded.size + "/13 · downloading " + key + ". Play can continue.";
+        const map = await loadTex(TEXTURE_NAMES[key], key === "ring" ? { wrap: true } : null, run.signal);
+        if (run.signal.aborted) {
+          // Only dispose this newly acquired, not-yet-shared map.
+          if (map) map.dispose();
+          break;
+        }
+        if (!map) { failed = true; break; }
+        textures[key] = map;
+        applyDetailMap(key);
+        detailLoaded.add(key);
+      }
+    } catch (_) {
+      failed = true;
+    } finally {
+      detailController = null;
+      const complete = detailLoaded.size === Object.keys(TEXTURE_NAMES).length;
+      if (detailButton) {
+        detailButton.disabled = complete;
+        detailButton.textContent = complete ? "Detail loaded" : "Load remaining detail";
+      }
+      if (detailStatus) detailStatus.textContent = complete ? "All 13 detail maps loaded." :
+        (run.signal.aborted ? "Loading stopped. Your browser may finish the active download. " : failed ? "Download stopped (connection or image unavailable). " : "") +
+        detailLoaded.size + "/13 loaded. Play continues; retry when ready.";
+    }
+  }
+  if (detailButton) detailButton.addEventListener("click", loadOptionalDetails);
 
   function makeGradientTexture(stops, size) {
     size = size || 256;
@@ -1252,7 +1361,7 @@
     return { map: map, normalMap: nrm };
   }
 
-  // --- Build sky after textures ----------------------------------------
+  // --- Build sky with local fallback materials ----------------------------------------
   const bodies = []; // { name, group, mesh, def, angle, radius, worldPos }
   let sunCore, sunGlow, stars, skyDome, asteroidBelt, kuiperBelt;
   let textures = {};
@@ -1712,6 +1821,79 @@
     return moonG;
   }
 
+  function rebindBodyMaps() {
+    for (let i = 0; i < bodies.length; i++) {
+      const b = bodies[i];
+      if (!b || !b.mesh || !b.mesh.material) continue;
+      const key = ((b.def && b.def.key) || b.name || "").toLowerCase();
+      const map = textures[key];
+      if (!usableMap(map)) continue;
+      const mat = b.mesh.material;
+      if (mat.map === map) continue;
+      mat.map = map;
+      mat.color.setHex(0xffffff);
+      // Do not attach a normal map. A second sampler is what blanked Earth.
+      mat.needsUpdate = true;
+    }
+  }
+
+  function addCloudDetail(group, def) {
+    if (!usableMap(textures.clouds) || group.getObjectByName("clouds")) return;
+    // The JPEG is a gray field (mean ~71), not a cutout. Used as a
+    // half-opaque map it filmed the whole daymap. Keep only the bright deck.
+    const cloudMap = cloudDeckMap(textures.clouds);
+    const cMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(def.radius * 1.025, 64, 48),
+      new THREE.MeshBasicMaterial({
+        map: cloudMap,
+        color: 0xffffff,
+        transparent: true,
+        opacity: 1,
+        depthWrite: false,
+        depthTest: true,
+        alphaTest: 0.06,
+        fog: false,
+        toneMapped: false,
+      })
+    );
+    cMesh.name = "clouds";
+    cMesh.userData.isCloudDetail = true;
+    group.add(cMesh);
+    // New cosmetic shell must obey walking/LOD visibility on the next frame.
+    cMesh.visible = false;
+  }
+
+  function applyDetailMap(key) {
+    rebindBodyMaps();
+    if (key === "clouds") {
+      const earth = bodies.find((b) => b.name === "Earth");
+      if (earth) addCloudDetail(earth.group, earth.def);
+    } else if (key === "ring") {
+      const saturn = bodies.find((b) => b.name === "Saturn");
+      const ring = saturn && saturn.group.getObjectByName("rings");
+      if (ring) {
+        ring.material.map = textures.ring;
+        ring.material.color.setHex(0xffffff);
+        ring.material.opacity = 1;
+        ring.material.alphaTest = 0.04;
+        ring.material.needsUpdate = true;
+      }
+    } else if (key === "starsMW") {
+      const sky = window.__vesperDeepSky;
+      if (sky && sky.setMilkyWay) {
+        sky.setMilkyWay(textures.starsMW);
+      } else if (!skyDome) {
+        skyDome = new THREE.Mesh(
+          new THREE.SphereGeometry(Math.max(orbitAU(95), 72000), 64, 40),
+          new THREE.MeshBasicMaterial({ map: textures.starsMW, side: THREE.BackSide,
+            depthWrite: false, color: 0xffe8dc, toneMapped: false })
+        );
+        skyDome.visible = !flight.walking;
+        scene.add(skyDome);
+      }
+    }
+  }
+
   async function buildWorld() {
     setProgress(0.25);
     // Rubric #1: sky visible ASAP (no black void under loader)
@@ -1736,50 +1918,7 @@
         }
       } catch (_) {}
     }
-    const names = {
-      sun: "2k_sun.jpg",
-      mercury: "2k_mercury.jpg",
-      venus: "2k_venus_atmosphere.jpg",
-      earth: "2k_earth_daymap.jpg",
-      clouds: "2k_earth_clouds.jpg",
-      moon: "2k_moon.jpg",
-      mars: "2k_mars.jpg",
-      jupiter: "2k_jupiter.jpg",
-      saturn: "2k_saturn.jpg",
-      ring: "2k_saturn_ring_alpha.png",
-      uranus: "2k_uranus.jpg",
-      neptune: "2k_neptune.jpg",
-      starsMW: "2k_stars_milky_way.jpg",
-    };
-    const keys = Object.keys(names);
-    let done = 0;
-    // Stream critical textures first (Sun/Earth/MW) — rest in parallel after
-    const critical = ["sun", "earth", "clouds", "moon", "starsMW"];
-    const rest = keys.filter((k) => critical.indexOf(k) < 0);
-    async function loadKey(k) {
-      textures[k] = await loadTex(names[k], k === "ring" ? { wrap: true } : null);
-      done++;
-      setProgress(0.25 + (done / keys.length) * 0.4);
-    }
-    await Promise.all(critical.filter((k) => names[k]).map(loadKey));
-    await Promise.all(rest.map(loadKey));
-
-    // Procedural fills — defer heavy bake on coarse until after first fly frame
-    function rebindBodyMaps() {
-      for (let i = 0; i < bodies.length; i++) {
-        const b = bodies[i];
-        if (!b || !b.mesh || !b.mesh.material) continue;
-        const key = ((b.def && b.def.key) || b.name || "").toLowerCase();
-        const map = textures[key];
-        if (!usableMap(map)) continue;
-        const mat = b.mesh.material;
-        if (mat.map === map) continue;
-        mat.map = map;
-        mat.color.setHex(0xffffff);
-        // Do not attach a normal map. A second sampler is what blanked Earth.
-        mat.needsUpdate = true;
-      }
-    }
+    // Build the existing fallback world now; photos never gate first play.
     function bakeProc() {
       if (!window.VesperProcTex) return;
       // One body per turn. A full 1024² fbm bake is a multi-second
@@ -2056,28 +2195,7 @@
         } catch (_) {}
       }
 
-      if (def.clouds && textures.clouds) {
-        // The JPEG is a gray field (mean ~71), not a cutout. Used as a
-        // half-opaque map it filmed the whole daymap. Keep only the bright deck.
-        const cloudMap = cloudDeckMap(textures.clouds);
-        const cMesh = new THREE.Mesh(
-          new THREE.SphereGeometry(def.radius * 1.025, 64, 48),
-          new THREE.MeshBasicMaterial({
-            map: cloudMap,
-            color: 0xffffff,
-            transparent: true,
-            opacity: 1,
-            depthWrite: false,
-            depthTest: true,
-            alphaTest: 0.06,
-            fog: false,
-            toneMapped: false,
-          })
-        );
-        cMesh.name = "clouds";
-        cMesh.userData.isCloudDetail = true;
-        group.add(cMesh);
-      }
+      if (def.clouds && textures.clouds) addCloudDetail(group, def);
 
       if (def.ring) {
         if (def.name === "Uranus") {
@@ -5624,6 +5742,7 @@
   flight.shipParkPos = new THREE.Vector3();
   flight.shipParkQuat = new THREE.Quaternion();
 
+  function startWorld() {
   buildWorld().then(() => {
     resetFlight();
     // Honor product + FLOAT/PILOT + clock
@@ -5641,6 +5760,7 @@
     RIVER.lastInputAt = performance.now();
     setProgress(1);
     state.ready = true;
+    if (detailButton) detailButton.disabled = false;
     // Phone: densify starfield after first smooth frames (butter open)
     if (PERF.low && stars && typeof makeStarField === "function") {
       setTimeout(() => {
@@ -5688,4 +5808,8 @@
     }, PERF.low ? 640 : 280);
     animate();
   });
+  }
+  // All defer-script extensions must attach before the ready event can fire.
+  if (document.readyState !== "complete") document.addEventListener("DOMContentLoaded", startWorld, { once: true });
+  else startWorld();
 })();

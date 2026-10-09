@@ -335,6 +335,29 @@
       skyDome,
       gegenschein: geg,
       skyR,
+      setMilkyWay(map) {
+        if (!map || !skyDome || skyDome.material.map === map) return;
+        // Reuse the fallback dome: walking visibility, follow and scale survive.
+        skyDome.material.map = map;
+        skyDome.material.color.setHex(0xffe8dc);
+        skyDome.material.fog = false;
+        skyDome.material.needsUpdate = true;
+        skyDome.name = "milkyWayDome";
+        if (!group.getObjectByName("mwBeautyVeil")) {
+          const veil = new T.Mesh(
+            new T.SphereGeometry(skyR * 0.995, 48, 32),
+            new T.MeshBasicMaterial({
+              map: new T.CanvasTexture(makeMWBoostCanvas(256)),
+              side: T.BackSide, depthWrite: false, transparent: true,
+              opacity: 0.72, blending: T.AdditiveBlending, toneMapped: false,
+            })
+          );
+          veil.material.map.colorSpace = T.SRGBColorSpace || T.sRGBEncoding;
+          veil.material.map.needsUpdate = true;
+          veil.name = "mwBeautyVeil";
+          group.add(veil);
+        }
+      },
       setBeauty(amount) {
         // 0..1 wind-down linked or explicit
         const a = Math.max(0.4, Math.min(1, amount));
